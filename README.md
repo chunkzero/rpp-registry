@@ -53,3 +53,7 @@ all yanked disappears from `index.json`.
 python3 -m unittest discover -s scripts -p 'test_*.py'
 python3 scripts/registry.py check
 ```
+
+## License
+
+The registry index and scripts are dedicated to the public domain under [CC0 1.0](LICENSE). Each plugin keeps its own license.
