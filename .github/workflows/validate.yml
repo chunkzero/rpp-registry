@@ -1,0 +1,21 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Validate pull request
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/registry.py check --base origin/${{ github.base_ref }}
+      - name: Validate main
+        if: github.event_name == 'push'
+        run: python3 scripts/registry.py check
