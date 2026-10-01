@@ -15,7 +15,7 @@ import registry
 REPO = "https://github.com/acme/widget"
 
 
-def make_archive(manifest: dict | None, symlink: bool = False) -> bytes:
+def make_archive(manifest: dict | None, symlink: bool = False, padding: int = 0) -> bytes:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         if manifest is not None:
@@ -28,6 +28,10 @@ def make_archive(manifest: dict | None, symlink: bool = False) -> bytes:
             link.type = tarfile.SYMTYPE
             link.linkname = "/etc/passwd"
             tar.addfile(link)
+        if padding:
+            pad = tarfile.TarInfo("pad.bin")
+            pad.size = padding
+            tar.addfile(pad, io.BytesIO(bytes(padding)))
     return buf.getvalue()
 
 
@@ -142,6 +146,53 @@ class RegistryTest(unittest.TestCase):
         self.write([version_entry("1.0.0", archive)])
         problems = registry.check(self.root, download=True)
         self.assertTrue(any("not a regular file" in p for p in problems), problems)
+
+    def test_rejects_oversized_unpacked_archive(self):
+        archive = make_archive({"name": "widget", "version": "1.0.0"}, padding=4096)
+        with mock.patch.object(registry, "MAX_UNPACKED_BYTES", 2048):
+            errors = registry.validate_archive(archive, "widget", "1.0.0")
+        self.assertTrue(any("unpacks to more than" in e for e in errors), errors)
+
+    def test_rejects_sparse_entry(self):
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            info = tarfile.TarInfo("sparse")
+            info.type = tarfile.GNUTYPE_SPARSE
+            tar.addfile(info)
+        errors = registry.validate_archive(buf.getvalue(), "widget", "1.0.0")
+        self.assertTrue(any("not a regular file" in e for e in errors), errors)
+
+    def test_rejects_oversized_manifest(self):
+        archive = make_archive({"name": "widget", "version": "1.0.0", "pad": "x" * 200})
+        with mock.patch.object(registry, "MAX_MANIFEST_BYTES", 100):
+            errors = registry.validate_archive(archive, "widget", "1.0.0")
+        self.assertTrue(any("rpp.json exceeds" in e for e in errors), errors)
+
+    def test_rejects_too_many_entries(self):
+        archive = make_archive({"name": "widget", "version": "1.0.0"}, symlink=True)
+        with mock.patch.object(registry, "MAX_ENTRIES", 1):
+            errors = registry.validate_archive(archive, "widget", "1.0.0")
+        self.assertTrue(any("more than 1 entries" in e for e in errors), errors)
+
+    def test_rejects_inserted_version(self):
+        self.write([version_entry("1.0.0"), version_entry("1.2.0")])
+        self.commit()
+        archive = make_archive({"name": "widget", "version": "1.1.0"})
+        self.serve("1.1.0", archive)
+        self.write([version_entry("1.0.0"), version_entry("1.1.0", archive), version_entry("1.2.0")])
+        problems = registry.check(self.root, base="HEAD")
+        self.assertTrue(any("must be appended" in p for p in problems), problems)
+
+    def test_semver_is_ascii_and_anchored(self):
+        self.assertFalse(registry.is_semver("1.0.0\n"))
+        self.assertFalse(registry.is_semver("١.0.0"))
+        self.assertTrue(registry.is_semver("1.0.0-rc.1+build.5"))
+
+    def test_version_requirement_syntax(self):
+        for ok in ("*", ">=0.2", "^1.2.3", "~1.2", ">=1, <2", "1.*", "=1.2.3-rc.1", "1.x.x"):
+            self.assertTrue(registry.is_version_req(ok), ok)
+        for bad in ("", " ", ">=", "1.2.3.4", "1.*.3", "latest", ">=1,", "01.2", "=>1", "1.0\n,"):
+            self.assertFalse(registry.is_version_req(bad), bad)
 
     def test_stale_index_fails(self):
         self.write([version_entry("1.0.0")])

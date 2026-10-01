@@ -3,30 +3,43 @@
 
 import argparse
 import hashlib
+import gzip
 import io
 import json
 import re
 import subprocess
 import sys
 import tarfile
+import zlib
 from pathlib import Path, PurePosixPath
 from urllib.request import Request, urlopen
 
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_UNPACKED_BYTES = 512 * 1024 * 1024
+MAX_FILE_BYTES = 256 * 1024 * 1024
+MAX_ENTRIES = 10_000
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 REPO_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_PRE = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*"
 SEMVER_RE = re.compile(
-    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
-    r"(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?"
-    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    rf"(?:-({_PRE}))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 )
+_NUM, _WILD = r"(?:0|[1-9][0-9]*)", r"[*xX]"
+# Mirrors the Rust `semver` crate's VersionReq grammar.
+_COMPARATOR = (
+    rf"{_WILD}|(?:=|>=|>|<=|<|~|\^)?\s*{_NUM}"
+    rf"(?:\.(?:{_NUM}(?:\.(?:{_NUM}(?:-{_PRE})?|{_WILD}))?|{_WILD}(?:\.{_WILD})?))?"
+)
+COMPARATOR_RE = re.compile(_COMPARATOR)
 
 
 def semver_key(version: str) -> tuple:
     """Sort key following semver 2.0 precedence; build metadata is ignored."""
-    m = SEMVER_RE.match(version)
+    m = SEMVER_RE.fullmatch(version)
     if not m:
         raise ValueError(f"invalid semver {version!r}")
     major, minor, patch, pre = m.groups()
@@ -39,7 +52,13 @@ def semver_key(version: str) -> tuple:
 
 
 def is_semver(value: object) -> bool:
-    return isinstance(value, str) and SEMVER_RE.match(value) is not None
+    return isinstance(value, str) and SEMVER_RE.fullmatch(value) is not None
+
+
+def is_version_req(value: object) -> bool:
+    return isinstance(value, str) and all(
+        COMPARATOR_RE.fullmatch(part.strip()) for part in value.split(",")
+    )
 
 
 def load_plugins(root: Path) -> tuple[dict[str, dict], list[str]]:
@@ -64,11 +83,11 @@ def validate_plugin(stem: str, data: object) -> list[str]:
         return ["expected a JSON object"]
     errors: list[str] = []
     name, repo = data.get("name"), data.get("repository")
-    if not isinstance(name, str) or not NAME_RE.match(name):
+    if not isinstance(name, str) or not NAME_RE.fullmatch(name):
         errors.append("invalid name")
     elif name != stem:
         errors.append(f"name {name!r} does not match file stem {stem!r}")
-    if not isinstance(repo, str) or not REPO_RE.match(repo):
+    if not isinstance(repo, str) or not REPO_RE.fullmatch(repo):
         errors.append("repository must be https://github.com/<owner>/<repo>")
         repo = None
     if data.get("description") is not None and not isinstance(data["description"], str):
@@ -92,10 +111,10 @@ def validate_plugin(stem: str, data: object) -> list[str]:
             errors.append(f"{label}: url must be a string")
         elif repo and not url.startswith(f"{repo}/releases/download/"):
             errors.append(f"{label}: url must start with {repo}/releases/download/")
-        if not isinstance(v.get("sha256"), str) or not SHA256_RE.match(v["sha256"]):
+        if not isinstance(v.get("sha256"), str) or not SHA256_RE.fullmatch(v["sha256"]):
             errors.append(f"{label}: sha256 must be 64 lowercase hex characters")
-        if not isinstance(v.get("rpp"), str) or not v["rpp"].strip():
-            errors.append(f"{label}: rpp must be a non-empty string")
+        if not is_version_req(v.get("rpp")):
+            errors.append(f"{label}: rpp must be a semver version requirement")
         if not isinstance(v.get("yanked", False), bool):
             errors.append(f"{label}: yanked must be a boolean")
     if len(keys) == len(versions) and any(a >= b for a, b in zip(keys, keys[1:])):
@@ -146,9 +165,9 @@ def compare_to_base(head: dict, base: dict) -> list[str]:
                 errors.append(f"published version {bv['version']}: {f} must not change")
         if bv.get("yanked", False) and not hv.get("yanked", False):
             errors.append(f"published version {bv['version']}: cannot be un-yanked")
-    kept = [v["version"] for v in head["versions"] if v["version"] in base_versions]
-    if kept != [v for v in base_versions if v in head_by_version]:
-        errors.append("published versions were reordered")
+    head_versions = [v["version"] for v in head["versions"]]
+    if head_versions[: len(base_versions)] != base_versions and set(base_versions) <= set(head_versions):
+        errors.append("new versions must be appended after the published versions")
     return errors
 
 
@@ -161,20 +180,42 @@ def fetch(url: str) -> bytes:
     return data
 
 
+class _CappedReader:
+    """Reads a gzip stream, failing once more than MAX_UNPACKED_BYTES come out."""
+
+    def __init__(self, data: bytes):
+        self._gz = gzip.GzipFile(fileobj=io.BytesIO(data))
+        self._total = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._gz.read(size if size >= 0 else MAX_UNPACKED_BYTES + 1)
+        self._total += len(chunk)
+        if self._total > MAX_UNPACKED_BYTES:
+            raise ValueError(f"archive unpacks to more than {MAX_UNPACKED_BYTES} bytes")
+        return chunk
+
+
 def validate_archive(data: bytes, name: str, version: str) -> list[str]:
     errors = []
     manifest = None
     try:
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-            for member in tar:
+        with tarfile.open(fileobj=_CappedReader(data), mode="r|") as tar:
+            for count, member in enumerate(tar, 1):
+                if count > MAX_ENTRIES:
+                    return [f"archive has more than {MAX_ENTRIES} entries"]
                 path = PurePosixPath(member.name)
                 if path.is_absolute() or ".." in path.parts:
                     errors.append(f"unsafe path {member.name!r}")
-                if not (member.isreg() or member.isdir()):
+                if not (member.isreg() or member.isdir()) or member.issparse():
                     errors.append(f"entry {member.name!r} is not a regular file or directory")
+                elif member.size > MAX_FILE_BYTES:
+                    errors.append(f"entry {member.name!r} exceeds {MAX_FILE_BYTES} bytes")
                 elif member.isreg() and path.parts == ("rpp.json",):
-                    manifest = tar.extractfile(member).read(MAX_MANIFEST_BYTES + 1)
-    except (tarfile.TarError, OSError, EOFError) as e:
+                    if member.size > MAX_MANIFEST_BYTES:
+                        errors.append(f"rpp.json exceeds {MAX_MANIFEST_BYTES} bytes")
+                    else:
+                        manifest = tar.extractfile(member).read()
+    except (tarfile.TarError, OSError, EOFError, ValueError, zlib.error) as e:
         return [f"unreadable archive: {e}"]
     if errors:
         return errors
