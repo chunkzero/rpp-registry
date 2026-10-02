@@ -8,6 +8,12 @@
       "url": "https://github.com/chunkzero/window/releases/download/v0.1.0-alpha.0/window-0.1.0-alpha.0.rpp.tgz",
       "sha256": "86385795f3de8995bff9409e3837c1ef772ff3edac19250938772ef0235a333b",
       "rpp": ">=0.1.0-alpha.0"
+    },
+    {
+      "version": "0.1.0-nightly.20261002.g67305fc8e4c3",
+      "url": "https://github.com/chunkzero/window/releases/download/v0.1.0-nightly.20261002.g67305fc8e4c3/window-0.1.0-nightly.20261002.g67305fc8e4c3.rpp.tgz",
+      "sha256": "fc5411dadd63aa79df948584dbb13acaf53e759e8d5570439b633f70a9a9543e",
+      "rpp": ">=0.1.0-alpha.0"
     }
   ]
 }
