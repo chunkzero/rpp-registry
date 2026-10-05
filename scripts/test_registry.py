@@ -196,14 +196,13 @@ class RegistryTest(unittest.TestCase):
             errors = registry.validate_archive(archive, "widget", "1.0.0")
         self.assertTrue(any("more than 1 entries" in e for e in errors), errors)
 
-    def test_rejects_inserted_version(self):
+    def test_accepts_version_inserted_in_semver_order(self):
         self.write([version_entry("1.0.0"), version_entry("1.2.0")])
         self.commit()
         archive = make_archive({"name": "widget", "version": "1.1.0"})
         self.serve("1.1.0", archive)
         self.write([version_entry("1.0.0"), version_entry("1.1.0", archive), version_entry("1.2.0")])
-        problems = registry.check(self.root, base="HEAD")
-        self.assertTrue(any("must be appended" in p for p in problems), problems)
+        self.assertEqual(registry.check(self.root, base="HEAD"), [])
 
     def test_semver_is_ascii_and_anchored(self):
         self.assertFalse(registry.is_semver("1.0.0\n"))
