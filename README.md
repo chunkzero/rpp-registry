@@ -7,7 +7,9 @@ plain HTTP from `https://raw.githubusercontent.com/chunkzero/rpp-registry/main/`
 
 - `plugins/<name>.json`: one file per plugin, edited by hand.
 - `index.json`: generated summary (name, description, repository, latest version). Never edit it
-  directly; run `python3 scripts/registry.py index`.
+  directly; run `python3 scripts/registry.py index`. `latest` is the newest non-yanked stable
+  version (no `-` prerelease suffix), so nightlies, alphas, betas and release candidates never
+  become `latest`. A plugin with no such version is left out of `index.json`.
 
 ```json
 {
@@ -46,6 +48,13 @@ Every PR needs review from the repository owner (see `.github/CODEOWNERS`).
 Set `"yanked": true` on a version and regenerate `index.json`. Published versions are otherwise
 immutable: they cannot be edited, reordered, removed, or un-yanked. A plugin whose versions are
 all yanked disappears from `index.json`.
+
+## Prereleases
+
+Prerelease versions are published like any other and sort by semver precedence. Nightlies use
+`X.Y.Z-nightly.YYYYMMDDHHMMSS.g<sha12>` (older ones use `X.Y.Z-nightly.YYYYMMDD.g<sha12>`); the
+timestamp is a numeric identifier, so both forms order chronologically. Others use
+`X.Y.Z-alpha.N`, `-beta.N` or `-rc.N`.
 
 ## Development
 

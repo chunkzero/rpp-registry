@@ -99,11 +99,33 @@ class RegistryTest(unittest.TestCase):
         self.assertLess(registry.semver_key("1.1.0-rc.1"), registry.semver_key("1.1.0"))
         self.assertLess(registry.semver_key("1.2.0"), registry.semver_key("1.10.0"))
         self.write([version_entry("1.0.0"), version_entry("1.1.0-rc.1"), version_entry("1.1.0"),
-                    version_entry("1.2.0", yanked=True)], "zeta")
+                    version_entry("1.2.0", yanked=True), version_entry("1.3.0-beta.1")], "zeta")
         self.write([version_entry("1.0.0", yanked=True)], "alpha")
         self.write([version_entry("0.1.0")], "beta")
+        self.write([version_entry("0.1.0-alpha.0"), version_entry("0.1.0-nightly.20261003.g9872875840f7")],
+                   "gamma")
         index = json.loads((self.root / "index.json").read_text())
         self.assertEqual([(e["name"], e["latest"]) for e in index], [("beta", "0.1.0"), ("zeta", "1.1.0")])
+
+    def test_nightly_formats_order_and_append(self):
+        versions = [
+            "0.1.0-alpha.0",
+            "0.1.0-beta.2",
+            "0.1.0-nightly.20261002.g67305fc8e4c3",
+            "0.1.0-nightly.20261003.g9872875840f7",
+            "0.1.0-nightly.20261004093000.g12336a991a34",
+            "0.1.0-nightly.20261004181500.g0123456789ab",
+            "0.1.0-rc.1",
+            "0.1.0",
+        ]
+        keys = [registry.semver_key(v) for v in versions]
+        self.assertEqual(keys, sorted(keys))
+        self.write([version_entry(v) for v in versions[2:4]])
+        self.commit()
+        archive = make_archive({"name": "widget", "version": versions[4]})
+        self.serve(versions[4], archive)
+        self.write([version_entry(v) for v in versions[2:4]] + [version_entry(versions[4], archive)])
+        self.assertEqual(registry.check(self.root, base="HEAD"), [])
 
     def test_rejects_edited_published_version(self):
         self.write([version_entry("1.0.0")])
