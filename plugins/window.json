@@ -1,7 +1,7 @@
 {
   "name": "window",
   "repository": "https://github.com/chunkzero/window",
-  "description": "Compiles UIs into resource-pack assets and Kotlin bindings. Source commit: 9872875840f74b8bb88bb354970b827edb1c57cc",
+  "description": "Compiles UIs into resource-pack assets and Kotlin bindings. Source commit: da50533dff979a5e05616a767ef845af46f4cbdd",
   "versions": [
     {
       "version": "0.1.0-alpha.0",
@@ -19,6 +19,12 @@
       "version": "0.1.0-nightly.20261003.g9872875840f7",
       "url": "https://github.com/chunkzero/window/releases/download/v0.1.0-nightly.20261003.g9872875840f7/window-0.1.0-nightly.20261003.g9872875840f7.rpp.tgz",
       "sha256": "0130ee0b5fae45573add73dee0b3a52d40e5beccb5fc0602dee6e70901ad9704",
+      "rpp": ">=0.1.0-alpha.0"
+    },
+    {
+      "version": "0.1.0-nightly.20261005040349.gda50533dff97",
+      "url": "https://github.com/chunkzero/window/releases/download/v0.1.0-nightly.20261005040349.gda50533dff97/window-0.1.0-nightly.20261005040349.gda50533dff97.rpp.tgz",
+      "sha256": "0334c94b40e38e93cb21c635601752d53109236ac567337947cca7c10a6c2a20",
       "rpp": ">=0.1.0-alpha.0"
     }
   ]
