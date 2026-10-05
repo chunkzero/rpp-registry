@@ -1,8 +1,1 @@
-[
-  {
-    "name": "window",
-    "description": "Compiles UIs into resource-pack assets and Kotlin bindings. Source commit: 9872875840f74b8bb88bb354970b827edb1c57cc",
-    "repository": "https://github.com/chunkzero/window",
-    "latest": "0.1.0-nightly.20261003.g9872875840f7"
-  }
-]
+[]

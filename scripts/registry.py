@@ -126,9 +126,15 @@ def build_index(plugins: dict[str, dict]) -> str:
     entries = []
     for name in sorted(plugins):
         p = plugins[name]
-        live = [v["version"] for v in p["versions"] if not v.get("yanked", False)]
-        if live:
-            latest = max(live, key=semver_key)
+        # rpp's index.json schema requires a version for `latest`, so plugins without a
+        # stable release are left out rather than listed with null or a prerelease.
+        stable = [
+            v["version"]
+            for v in p["versions"]
+            if not v.get("yanked", False) and SEMVER_RE.fullmatch(v["version"]).group(4) is None
+        ]
+        if stable:
+            latest = max(stable, key=semver_key)
             entries.append(
                 {
                     "name": p["name"],
@@ -153,7 +159,6 @@ def compare_to_base(head: dict, base: dict) -> list[str]:
         if head[field] != base.get(field):
             errors.append(f"{field} must not change")
     head_by_version = {v["version"]: v for v in head["versions"]}
-    base_versions = [v["version"] for v in base.get("versions", []) if isinstance(v, dict)]
     for bv in base["versions"]:
         hv = head_by_version.get(bv["version"])
         if hv is None:
@@ -165,9 +170,6 @@ def compare_to_base(head: dict, base: dict) -> list[str]:
                 errors.append(f"published version {bv['version']}: {f} must not change")
         if bv.get("yanked", False) and not hv.get("yanked", False):
             errors.append(f"published version {bv['version']}: cannot be un-yanked")
-    head_versions = [v["version"] for v in head["versions"]]
-    if head_versions[: len(base_versions)] != base_versions and set(base_versions) <= set(head_versions):
-        errors.append("new versions must be appended after the published versions")
     return errors
 
 

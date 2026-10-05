@@ -7,7 +7,9 @@ plain HTTP from `https://raw.githubusercontent.com/chunkzero/rpp-registry/main/`
 
 - `plugins/<name>.json`: one file per plugin, edited by hand.
 - `index.json`: generated summary (name, description, repository, latest version). Never edit it
-  directly; run `python3 scripts/registry.py index`.
+  directly; run `python3 scripts/registry.py index`. `latest` is the newest non-yanked stable
+  version (no `-` prerelease suffix), so nightlies, alphas, betas and release candidates never
+  become `latest`. A plugin with no such version is left out of `index.json`.
 
 ```json
 {
@@ -34,8 +36,8 @@ containing `rpp.json` with the same `name` and `version`, and only regular files
 
 1. Build the release archive and its hash with `rpp plugin pack`, and upload the archive to a
    GitHub release in the plugin repository.
-2. Open a PR that appends the version to the `versions` of `plugins/<name>.json` (or adds a new
-   plugin file) and regenerates the index with `python3 scripts/registry.py index`.
+2. Open a PR that adds the version to the `versions` of `plugins/<name>.json` in semver order
+   (or adds a new plugin file) and regenerates the index with `python3 scripts/registry.py index`.
 3. CI runs `python3 scripts/registry.py check --base origin/main`, which downloads each new
    archive, verifies its hash and contents, and rejects changes to published versions.
 
@@ -46,6 +48,15 @@ Every PR needs review from the repository owner (see `.github/CODEOWNERS`).
 Set `"yanked": true` on a version and regenerate `index.json`. Published versions are otherwise
 immutable: they cannot be edited, reordered, removed, or un-yanked. A plugin whose versions are
 all yanked disappears from `index.json`.
+
+## Prereleases
+
+Prerelease versions are published like any other and sort by semver precedence. Nightlies use
+`X.Y.Z-nightly.YYYYMMDDHHMMSS.g<sha12>` (older ones use `X.Y.Z-nightly.YYYYMMDD.g<sha12>`); the
+timestamp is a numeric identifier, so each form orders chronologically and every 14-digit nightly
+sorts after every 8-digit one of the same version. A beta or rc registered after nightlies of the
+same version sorts below or above them by precedence, wherever that falls. Others use
+`X.Y.Z-alpha.N`, `-beta.N` or `-rc.N`.
 
 ## Development
 
